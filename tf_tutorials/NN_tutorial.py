@@ -69,15 +69,23 @@ with tf.name_scope("Dataset_Iterators"):
 # Defining NN Model
 def neural_network(input, name = "network"):
     with tf.name_scope(name):
+        img = tf.reshape(input, [-1, 28, 28, 1])
+        tf.summary.image("Input", img, 5)
         # Weights connecting layers 1 (input) --> 2
         Theta_1 = tf.Variable(tf.random_normal([784, 50], stddev = 0.05), name = "Theta_1")
         Bias_1 = tf.Variable(tf.random_normal([50], stddev = 0.5), name = "Bias_1")
+        tf.summary.histogram("L1_weights", Theta_1)
+        tf.summary.histogram("L1_bias", Bias_1)
         # Weights connecting layers 2 --> 3
         Theta_2 = tf.Variable(tf.random_normal([50, 25], stddev = 0.05), name = "Theta_2")
         Bias_2 = tf.Variable(tf.random_normal([25], stddev = 0.5), name = "Bias_2")
+        tf.summary.histogram("L2_weights", Theta_2)
+        tf.summary.histogram("L2_bias", Bias_2)
         # Weights connecting layers 3 --> 4 (output)
         Theta_3 = tf.Variable(tf.random_normal([25, 10], stddev = 0.05), name = "Theta_3")
-        Bias_3 = tf.Variable(tf.random_normal([10]), name = "Bias_3")
+        Bias_3 = tf.Variable(tf.random_normal([10], stddev = 0.5), name = "Bias_3")
+        tf.summary.histogram("L3_weights", Theta_3)
+        tf.summary.histogram("L3_bias", Bias_3)
         # Calculating the activation of the layers
         a2 = tf.add(tf.matmul(input, Theta_1), Bias_1)
         a2 = tf.nn.relu(a2)
@@ -95,7 +103,8 @@ y = neural_network(images)
 # Building cost function (cross entropy) and training operation
 with tf.name_scope("Cost_Function"):
     cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels = labels, logits = y))
-
+    tf.summary.scalar("Cross_Entropy", cost)
+    
 with tf.name_scope("Train"):
     train = tf.train.AdamOptimizer().minimize(cost)
 
@@ -104,8 +113,11 @@ with tf.name_scope("Accuracy"):
     prediction = tf.argmax(y, 1)
     equality = tf.equal(prediction, tf.argmax(labels, 1))
     accuracy = tf.reduce_mean(tf.cast(equality, tf.float32))
+    tf.summary.scalar("Accuracy", accuracy)
 
 init_op = tf.global_variables_initializer()
+
+merged_summary = tf.summary.merge_all()
 
 ########################################
 #Executing The Default TensorFlow Graph#
@@ -117,6 +129,7 @@ with tf.Session() as sess:
     writer.add_graph(sess.graph)
     
     # Running Initilization operation of TensorFlow graph
+    # -initializes variables to declared values
     sess.run(init_op)
 
     # Training Run
@@ -131,6 +144,8 @@ with tf.Session() as sess:
                 avg_cost = avg_cost + C
                 avg_acc = avg_acc + acc
                 if batch % 10 == 0:
+                    sm = sess.run(merged_summary)
+                    writer.add_summary(sm, batch)
                     print("Epoch: {}, Batch: {}, Cost: {:.3f}, training accuracy: {:.2f}%".format(i, batch, C, acc * 100))
                 batch = batch + 1
             except tf.errors.OutOfRangeError:
