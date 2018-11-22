@@ -68,9 +68,22 @@ with tf.name_scope("Dataset_Iterators"):
 
 # Defining NN Model
 
-def build_conv2d_layer():
-    return None
+# input given: [batch, height, width, depth]
+def build_conv2d_layer(name, input, num_channels, kernal_shape, strides = [1, 1, 1, 1], padding = "SAME", use_bias = True, act_func = lambda act: act):
+    with tf.name_scope(name):
+        input_shape = input.get_shape().as_list()
+        kernal_shape.append(input_shape[3])
+        kernal_shape.append(num_channels)
+        kernals = tf.Variable(tf.random_normal(kernal_shape, stddev = 0.05), name = "kernals")
+        output = tf.nn.conv2d(input, kernals, strides, padding, name = "Convolution")
+        if use_bias:
+            bias = tf.Variable(tf.random_normal([num_channels], stddev = 0.5), name = "bias")
+            output = tf.add(output, bias)
+        output = act_func(output)
+        return output
 
+    
+# Hyperparams: width of layer, activation function,     
 def build_fc_layer(name, input, width, act_func = lambda act: act):
     with tf.name_scope(name):
         # grabbing static shape of input tensor.
@@ -81,14 +94,18 @@ def build_fc_layer(name, input, width, act_func = lambda act: act):
         activation = act_func(activation)
         return activation
 
-def build_m_pl_layer():
-    return None
-
 def build_network(input, name = "network"):
     with tf.name_scope(name):
-        layer_1 = build_fc_layer("layer_1", input, 50, tf.nn.relu)
-        layer_2 = build_fc_layer("layer_2", layer_1, 25, tf.nn.relu)
-        output = build_fc_layer("output", layer_2, 10)
+        input = tf.reshape(input, [-1, 28, 28, 1])
+        c_layer_1 = build_conv2d_layer("conv_layer_1", input, 5, [5, 5], act_func = tf.nn.relu)
+        m_pool_layer_1 = tf.nn.max_pool(c_layer_1, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = 'SAME')
+        c_layer_2 = build_conv2d_layer("conv_layer_2", m_pool_layer_1, 20, [3, 3], act_func = tf.nn.relu)
+        m_pool_layer_2 = tf.nn.max_pool(c_layer_2, ksize = [1, 4, 4, 1], strides = [1, 4, 4, 1], padding = 'SAME')
+        m_pool_layer_2 = tf.reshape(m_pool_layer_2, [-1, 320])
+        fc_layer_1 = build_fc_layer("fc_layer_1", m_pool_layer_2, 100, tf.nn.relu)
+        fc_layer_2 = build_fc_layer("fc_layer_2", fc_layer_1, 50, tf.nn.relu)
+        fc_layer_3 = build_fc_layer("fc_layer_3", fc_layer_2, 20, tf.nn.relu)
+        output = build_fc_layer("output_layer", fc_layer_3, 10)
         return output
 
 images, labels = iterator.get_next()
