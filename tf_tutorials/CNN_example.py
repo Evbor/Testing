@@ -1,6 +1,6 @@
 #############################################################################
 ##                                                                         ##
-## NN_tutorial.py: creates a neural network to classify handwritten        ##
+## CNN_example.py: creates a neural network to classify handwritten        ##
 ##                 numbers of the MNIST dataset using low level TensorFlow ##
 ##                 API and the tf.data API.                                ##
 ##                                                                         ##
@@ -8,6 +8,8 @@
 
 import tensorflow as tf
 from tensorflow.keras.datasets import mnist
+
+
 
 # Parameters
 training_batch_size = 32
