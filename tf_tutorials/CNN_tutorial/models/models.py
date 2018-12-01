@@ -1,21 +1,26 @@
 #############################################################################
 ##                                                                         ##
-## model_v1.py:    creates a neural network to classify handwritten        ##
+## model.py:       defines a models to classify handwritten                ##
 ##                 numbers of the MNIST dataset using low level TensorFlow ##
 ##                 API and the tf.data API.                                ##
 ##                                                                         ##
 #############################################################################
 
-""" hyperparameters: batch_size, use_bias_L1, output_channels_L1, 
-                     kernal_shape_L1, x_stride_L1, y_stride_L1, padding_L1,
-                     activation_fxn_L1, kernal_shape_L2, x_stride_L2, y_stride_L2
-                     padding_L2, width_L3, use_bias_L3, activation_fxn_L3
-
-
-"""
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.datasets import mnist
+
+"""
+hyperparameters
+Training: batch_size, epochs
+Layer_1: output_depth, convo_kernal_shape, strides, padding, use_bias, act_func,
+         init_func_w, init_func_b, init_func_params_w, init_func_params_b
+Layer_2: m_pl_kernal_shape, strides, padding
+Layer_3: output_width, use_bias, act_func, init_func_w, init_func_b, init_func_params_w
+         init_func_params_b
+Layer_o: init_func_w, init_func_b, init_func_params_w, init_func_params_b
+
+"""
 
 class model(object):
     def __init__(self, dtype, dshape, otype, oshape, hyparams):
@@ -35,15 +40,37 @@ class model(object):
         return self.__placeholder
     @hparams.setter
     def __hparams(self, vals):
-        # test if vals is a list of the correct hparams
-        self.__placeholder = vals
-        
-    # Trains model    
+        hparam_types = {"batch_size": type(1), "epochs": type(1), "L1_output_depth": type(1),
+                        "L1_convo_kernal_shape": type([]), "L1_strides": type([]),
+                        "L1_padding": type(""), "L1_use_bias": type(True),
+                        "L1_act_func": type(lambda v: v), "L1_init_func_w": type(lambda v:v), 
+                        "L1_init_func_b": type(lambda v: v), "L1_init_func_params_w": type({}),
+                        "L1_init_func_params_b": type({}), "L2_m_pl_kernal_shape": type([]),
+                        "L2_strides": type([]), "L2_padding": type(""), "L3_output_width": type(1),
+                        "L3_use_bias": type(True), "L3_act_func": type(lambda v: v),
+                        "L3_init_func_w": type(lambda v: v), "L3_init_func_b": type(lambda v: v),
+                        "L3_init_func_params_w": type({}), "L3_init_func_params_b": type({}),
+                        "Lo_init_func_w": type(lambda v: v), "Lo_init_func_b": type(lambda v: v),
+                        "Lo_init_func_params_w": type({}), "Lo_init_func_params_b": type({}),
+                        "Lo_use_bias": type(True)}
+
+        if (type(vals) == tf.contrib.training.HParams):
+            for key in hparam_types.keys():
+                if (key not in vals) or (hparam_types[key] != type(vals.values()[key])):
+                    raise ValueError("hyper parameters must contain key: {} with value of type: {}".format(key, hparam_types[key]))
+            self.__placeholder = vals
+        else:
+            raise ValueError("hyparams must be an object of type: tf.contrib.training.HParams")
+    
+    
+    
+    
+    # Trains model data_set   
     def train(self, data_set, labels):
         train_op, cost, accuracy, prediction, raw_prediction, merged_summary, init_op, iter_init_op, x_placeholder, y_placeholder = self.tf_graph.get_collection("nodes_to_run")
         with self.sess.as_default():
             self.sess.run(init_op)
-            for epoch in range(1):
+            for epoch in range(self.hparams.epochs):
                 self.sess.run(iter_init_op, feed_dict = {x_placeholder: data_set, y_placeholder: labels})
                 batch_num = 1
                 while True:
@@ -78,23 +105,25 @@ class model(object):
     #            input. While "VALID" means no padding is applied.
     #  use_bias = boolean. When True we add a bias offset to the results of our convolution operation
     #  act_func = function(tensor of any shape) ==> tensor of shape = size(tensor of any size)
-    #  init_func = function(tensor of any shape *params) ==> tensor of shape = inpupt shape
-    #  init_func_params = dictionary where each key is a the name of a parameter in init_func
-    #                     and the value of a key is the value passed to the parameter
+    #  init_func_w/b = function(tensor of any shape *params) ==> tensor of shape = inpupt shape
+    #  init_func_params_w/b = dictionary where each key is a the name of a parameter in init_func_w/b
+    #                         and the value of a key is the value passed to the parameter
     #  ==> Tensor of size [batch_size, new_height, new_width, output_depth] 
     def build_conv2D_layer(self, name, input, output_depth, kernal_shape, 
                            strides = [1, 1, 1, 1], padding = "SAME", 
                            use_bias = True, act_func = lambda act: act,
-                           init_func = tf.random_normal,
-                           init_func_params = {'stddev': 0.05}):
+                           init_func_w = tf.random_normal,
+                           init_func_params_w = {'stddev': 0.05},
+                           init_func_b = tf.random_normal,
+                           init_func_params_b = {'stddev': 0.05}):
         with tf.name_scope(name):
             input_shape = input.get_shape().as_list()
             kernal_shape.append(input_shape[3])
             kernal_shape.append(output_depth)
-            kernals = tf.Variable(init_func(kernal_shape, **init_func_params), name = "kernals")
+            kernals = tf.Variable(init_func_w(kernal_shape, **init_func_params_w), name = "kernals")
             output = tf.nn.conv2d(input, kernals, strides, padding, name = "Convolution")
             if use_bias:
-                bias = tf.Variable(init_func([output_depth], **init_func_params), name = "bias")
+                bias = tf.Variable(init_func_b([output_depth], **init_func_params_b), name = "bias")
                 output = tf.add(output, bias)
             output = act_func(output)
             return output
@@ -105,13 +134,23 @@ class model(object):
     #  input = Tensor of shape [batch_size, features]
     #  width = number 1-N specifies the number of neurons in the layer
     #  act_func = function(tensor of any shape) ==> tensor of shape = input shape
+    #  init_func_w/b = function(tensor of any shape *params) ==> tensor of shape = inpupt shape
+    #  init_func_params_w/b = dictionary where each key is a the name of a parameter in init_func
+    #                         and the value of a key is the value passed to the parameter
     #  ==> Tensor of shape [batch_size, width]
-    def build_fc_layer(self, name, input, width, act_func = lambda act: act):
+    def build_fc_layer(self, name, input, width, use_bias = True,
+                       act_func = lambda act: act,
+                       init_func_w = tf.random_normal, 
+                       init_func_params_w = {'stddev': 0.05},
+                       init_func_b = tf.random_normal,
+                       init_func_params_b = {'stddev': 0.5}):
         with tf.name_scope(name):
             input_shape = input.get_shape().as_list()
-            weights = tf.Variable(tf.random_normal([input_shape[1], width], stddev = 0.05), name = "weights")
-            bias = tf.Variable(tf.random_normal([width], stddev = 0.5), name = "bias")
-            activation = tf.add(tf.matmul(input, weights), bias)
+            weights = tf.Variable(init_func_w([input_shape[1], width], **init_func_params_w), name = "weights")
+            activation = tf.matmul(input, weights)
+            if use_bias:
+                bias = tf.Variable(init_func_b([width], **init_func_params_b), name = "bias")
+                activation = tf.add(activation, bias)
             activation = act_func(activation)
             return activation
     
@@ -123,19 +162,28 @@ class model(object):
     def build_model(self, name, input):
         with tf.name_scope(name):
             # Building convolution layer
-            c_layer_1 = self.build_conv2D_layer("conv_layer_1", input, output_depth = 5, 
-                                                  kernal_shape = [5, 5],
-                                                  act_func = tf.nn.relu)
+            c_layer_1 = self.build_conv2D_layer("conv_layer_1", input,
+                                                output_depth = self.hparams.L1_output_depth, 
+                                                kernal_shape = self.hparams.L1_convo_kernal_shape,
+                                                strides = self.hparams.L1_strides, padding = self.hparams.L1_padding,
+                                                use_bias = self.hparams.L1_use_bias, act_func = self.hparams.L1_act_func,
+                                                init_func_w = self.hparams.L1_init_func_w, init_func_params_w = self.hparams.L1_init_func_params_w,
+                                                init_func_b = self.hparams.L1_init_func_b, init_func_params_b = self.hparams.L1_init_func_params_b)
             # Building max pooling layer
-            m_pool_layer_1 = tf.nn.max_pool(c_layer_1, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1], padding = 'SAME')
+            m_pool_layer_1 = tf.nn.max_pool(c_layer_1, ksize = self.hparams.L2_m_pl_kernal_shape, strides = self.hparams.L2_strides, padding = self.hparams.L2_padding)
             # Reshaping m_pool_layer_1 for input to fully connect layers
             layer_shape = m_pool_layer_1.get_shape().as_list()
             new_shape = np.prod(layer_shape[1:])
             m_pool_layer_1 = tf.reshape(m_pool_layer_1, [-1, new_shape])
             # Building fully connected layer
-            fc_layer_1 = self.build_fc_layer("fc_layer_1", m_pool_layer_1, 100, act_func = tf.nn.relu)
+            fc_layer_1 = self.build_fc_layer("fc_layer_1", m_pool_layer_1, width = self.hparams.L3_output_width,
+                                             use_bias = self.hparams.L3_use_bias, act_func = self.hparams.L3_act_func,
+                                             init_func_w = self.hparams.L3_init_func_w, init_func_params_w = self.hparams.L3_init_func_params_w,
+                                             init_func_b = self.hparams.L3_init_func_b, init_func_params_b = self.hparams.L3_init_func_params_b)
             # Building fully connected output layer
-            output_layer = self.build_fc_layer("output_layer", fc_layer_1, 10)
+            output_layer = self.build_fc_layer("output_layer", fc_layer_1, width = 10, use_bias = self.hparams.Lo_use_bias,
+                                               init_func_w = self.hparams.Lo_init_func_w, init_func_params_w = self.hparams.Lo_init_func_params_w,
+                                               init_func_b = self.hparams.Lo_init_func_b, init_func_params_b = self.hparams.Lo_init_func_params_b)
             return output_layer
             
         
@@ -185,7 +233,18 @@ class model(object):
                 tf_graph.add_to_collection("nodes_to_run", node)
         return tf_graph
 
-hparams = tf.contrib.training.HParams(batch_size = 32)        
+hparams = tf.contrib.training.HParams(batch_size = 32, epochs = 1, L1_output_depth = 5,
+                                      L1_convo_kernal_shape = [5, 5], L1_strides = [1, 1, 1, 1],
+                                      L1_padding = "SAME", L1_use_bias = True, L1_act_func = tf.nn.relu,
+                                      L1_init_func_w = tf.random_normal, L1_init_func_b = tf.random_normal,
+                                      L1_init_func_params_w = {'stddev': 0.05}, L1_init_func_params_b = {'stddev': 0.05},
+                                      L2_m_pl_kernal_shape = [1, 2, 2, 1], L2_strides = [1, 2, 2, 1], L2_padding = "SAME",
+                                      L3_output_width = 100, L3_use_bias = True, L3_act_func = tf.nn.relu,
+                                      L3_init_func_w = tf.random_normal, L3_init_func_b = tf.random_normal,
+                                      L3_init_func_params_w = {'stddev': 0.05}, L3_init_func_params_b = {'stddev': 0.5},
+                                      Lo_init_func_w = tf.random_normal, Lo_init_func_b = tf.random_normal,
+                                      Lo_init_func_params_w = {'stddev': 0.05}, Lo_init_func_params_b = {'stddev': 0.5},
+                                      Lo_use_bias = True)        
 test_model = model(tf.float32, [28, 28], tf.int32, [1], hparams)   
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
 test_model.train(x_train, y_train)      
