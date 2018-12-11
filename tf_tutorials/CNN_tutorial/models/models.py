@@ -1,14 +1,24 @@
 #############################################################################
 ##                                                                         ##
-## model.py:       defines a models to classify handwritten                ##
+## model.py:       defines models to classify handwritten                  ##
 ##                 numbers of the MNIST dataset using low level TensorFlow ##
 ##                 API and the tf.data API.                                ##
 ##                                                                         ##
 #############################################################################
 
 import numpy as np
+import os 
 import tensorflow as tf
 from tensorflow.keras.datasets import mnist
+
+# TODO: 
+# 1) modify train so that it saves checkpoints of the graph's vars along with the data
+#    that has yet to be trained on so that if training is interrupted, I can continue
+#    training the model on the dataset.
+#
+# 2) dtype and otype can be regular python data types as opposed to tensorflow data types
+
+        
 
 """
 hyperparameters
@@ -23,17 +33,24 @@ Layer_o: init_func_w, init_func_b, init_func_params_w, init_func_params_b
 """
 
 class model(object):
-    def __init__(self, dtype, dshape, otype, oshape, hyparams):
+    def __init__(self, directory, dtype, dshape, otype, oshape, hyparams):
+        self.directory = directory
         self.data_type = dtype
         self.data_shape = dshape
         self.out_type = otype
         self.out_shape = oshape
         self.__hparams = hyparams
         self.tf_graph = self.build_graph()
+        with self.tf_graph.as_default():
+            self.saver = tf.train.Saver()
         self.sess = tf.Session(graph = self.tf_graph)
-        self.writer = tf.summary.FileWriter("D:\\Programs\\testing\\tf_tutorials\\CNN_tutorial\\models\\testss")
+        self.writer = tf.summary.FileWriter(self.directory)
         self.writer.add_graph(graph = self.sess.graph)
         self.writer.flush()
+        checkpoint = tf.train.get_checkpoint_state(self.directory + '\\checkpoints\\')
+        if checkpoint is not None:
+            self.saver.restore(self.sess, checkpoint.model_checkpoint_path)
+            
         
     @property
     def hparams(self):
@@ -54,23 +71,21 @@ class model(object):
                         "Lo_init_func_params_w": type({}), "Lo_init_func_params_b": type({}),
                         "Lo_use_bias": type(True)}
 
-        if (type(vals) == tf.contrib.training.HParams):
+        if (type(vals) == type({})):
             for key in hparam_types.keys():
-                if (key not in vals) or (hparam_types[key] != type(vals.values()[key])):
+                if (key not in vals) or (hparam_types[key] != type(vals[key])):
                     raise ValueError("hyper parameters must contain key: {} with value of type: {}".format(key, hparam_types[key]))
             self.__placeholder = vals
         else:
-            raise ValueError("hyparams must be an object of type: tf.contrib.training.HParams")
-    
-    
-    
+            raise ValueError("hyparams must be an object of type: dictionary")
     
     # Trains model data_set   
     def train(self, data_set, labels):
         train_op, cost, accuracy, prediction, raw_prediction, merged_summary, init_op, iter_init_op, x_placeholder, y_placeholder = self.tf_graph.get_collection("nodes_to_run")
         with self.sess.as_default():
             self.sess.run(init_op)
-            for epoch in range(self.hparams.epochs):
+            for epoch in range(self.hparams["epochs"]):
+                epoch = epoch + 1
                 self.sess.run(iter_init_op, feed_dict = {x_placeholder: data_set, y_placeholder: labels})
                 batch_num = 1
                 while True:
@@ -83,9 +98,39 @@ class model(object):
                         batch_num = batch_num + 1
                     except tf.errors.OutOfRangeError:
                         break
-                        
-        
 
+    # Evaluates model on data set = data_set, and labels = labels
+    #  ==> {"cost": number, "accuracy": number}
+    def evaluate(self, data_set, labels):
+        train_op, cost, accuracy, prediction, raw_prediction, merged_summary, init_op, iter_init_op, x_placeholder, y_placeholder = self.tf_graph.get_collection("nodes_to_run")
+        with self.sess.as_default():
+            self.sess.run(iter_init_op, feed_dict = {x_placeholder: data_set, y_placeholder: labels})
+            batch_num = 1
+            total_cost = 0
+            total_acc = 0
+            while True:
+                try:
+                    C, acc = self.sess.run([cost, accuracy])
+                    total_cost = total_cost + C
+                    total_acc = total_acc + acc
+                    batch_num = batch_num + 1
+                except tf.errors.OutOfRangeError:
+                    total_cost = total_cost / batch_num
+                    total_acc = total_acc / batch_num
+                    break
+            print("cost over data set: {:.3f}, accuracy over data set: {:.2f}%".format(total_cost, total_acc))
+            return {"cost": total_cost, "accuracy": total_acc}
+            
+    # Saves model to disk        
+    def save(self):
+        get_global_step_op = tf.train.get_global_step(self.tf_graph)
+        global_step = self.sess.run([get_global_step_op])
+        self.saver.save(self.sess, self.directory + '\\checkpoints\\tooop', global_step[0])
+        # Cant store HParams as a config file because parameter of type function
+        # cant be converted to a protocol buffer string or json string.
+        # will implement later.
+        
+        
     """ Functions that are used to build the model's Graph"""
     # Builds a 2D convolution layer
     #  Takes:
@@ -118,9 +163,10 @@ class model(object):
                            init_func_params_b = {'stddev': 0.05}):
         with tf.name_scope(name):
             input_shape = input.get_shape().as_list()
-            kernal_shape.append(input_shape[3])
-            kernal_shape.append(output_depth)
-            kernals = tf.Variable(init_func_w(kernal_shape, **init_func_params_w), name = "kernals")
+            kern_shape = kernal_shape[:]
+            kern_shape.append(input_shape[3])
+            kern_shape.append(output_depth)
+            kernals = tf.Variable(init_func_w(kern_shape, **init_func_params_w), name = "kernals")
             output = tf.nn.conv2d(input, kernals, strides, padding, name = "Convolution")
             if use_bias:
                 bias = tf.Variable(init_func_b([output_depth], **init_func_params_b), name = "bias")
@@ -163,27 +209,27 @@ class model(object):
         with tf.name_scope(name):
             # Building convolution layer
             c_layer_1 = self.build_conv2D_layer("conv_layer_1", input,
-                                                output_depth = self.hparams.L1_output_depth, 
-                                                kernal_shape = self.hparams.L1_convo_kernal_shape,
-                                                strides = self.hparams.L1_strides, padding = self.hparams.L1_padding,
-                                                use_bias = self.hparams.L1_use_bias, act_func = self.hparams.L1_act_func,
-                                                init_func_w = self.hparams.L1_init_func_w, init_func_params_w = self.hparams.L1_init_func_params_w,
-                                                init_func_b = self.hparams.L1_init_func_b, init_func_params_b = self.hparams.L1_init_func_params_b)
+                                                output_depth = self.hparams["L1_output_depth"], 
+                                                kernal_shape = self.hparams["L1_convo_kernal_shape"],
+                                                strides = self.hparams["L1_strides"], padding = self.hparams["L1_padding"],
+                                                use_bias = self.hparams["L1_use_bias"], act_func = self.hparams["L1_act_func"],
+                                                init_func_w = self.hparams["L1_init_func_w"], init_func_params_w = self.hparams["L1_init_func_params_w"],
+                                                init_func_b = self.hparams["L1_init_func_b"], init_func_params_b = self.hparams["L1_init_func_params_b"])
             # Building max pooling layer
-            m_pool_layer_1 = tf.nn.max_pool(c_layer_1, ksize = self.hparams.L2_m_pl_kernal_shape, strides = self.hparams.L2_strides, padding = self.hparams.L2_padding)
+            m_pool_layer_1 = tf.nn.max_pool(c_layer_1, ksize = self.hparams["L2_m_pl_kernal_shape"], strides = self.hparams["L2_strides"], padding = self.hparams["L2_padding"])
             # Reshaping m_pool_layer_1 for input to fully connect layers
             layer_shape = m_pool_layer_1.get_shape().as_list()
             new_shape = np.prod(layer_shape[1:])
             m_pool_layer_1 = tf.reshape(m_pool_layer_1, [-1, new_shape])
             # Building fully connected layer
-            fc_layer_1 = self.build_fc_layer("fc_layer_1", m_pool_layer_1, width = self.hparams.L3_output_width,
-                                             use_bias = self.hparams.L3_use_bias, act_func = self.hparams.L3_act_func,
-                                             init_func_w = self.hparams.L3_init_func_w, init_func_params_w = self.hparams.L3_init_func_params_w,
-                                             init_func_b = self.hparams.L3_init_func_b, init_func_params_b = self.hparams.L3_init_func_params_b)
+            fc_layer_1 = self.build_fc_layer("fc_layer_1", m_pool_layer_1, width = self.hparams["L3_output_width"],
+                                             use_bias = self.hparams["L3_use_bias"], act_func = self.hparams["L3_act_func"],
+                                             init_func_w = self.hparams["L3_init_func_w"], init_func_params_w = self.hparams["L3_init_func_params_w"],
+                                             init_func_b = self.hparams["L3_init_func_b"], init_func_params_b = self.hparams["L3_init_func_params_b"])
             # Building fully connected output layer
-            output_layer = self.build_fc_layer("output_layer", fc_layer_1, width = 10, use_bias = self.hparams.Lo_use_bias,
-                                               init_func_w = self.hparams.Lo_init_func_w, init_func_params_w = self.hparams.Lo_init_func_params_w,
-                                               init_func_b = self.hparams.Lo_init_func_b, init_func_params_b = self.hparams.Lo_init_func_params_b)
+            output_layer = self.build_fc_layer("output_layer", fc_layer_1, width = 10, use_bias = self.hparams["Lo_use_bias"],
+                                               init_func_w = self.hparams["Lo_init_func_w"], init_func_params_w = self.hparams["Lo_init_func_params_w"],
+                                               init_func_b = self.hparams["Lo_init_func_b"], init_func_params_b = self.hparams["Lo_init_func_params_b"])
             return output_layer
             
         
@@ -200,13 +246,15 @@ class model(object):
                 y_placeholder = tf.placeholder(self.out_type)
                 x_data = tf.data.Dataset.from_tensor_slices(x_placeholder).map(lambda e: tf.reshape(tf.cast(e, tf.float32), [28, 28, 1]))
                 y_data = tf.data.Dataset.from_tensor_slices(y_placeholder).map(lambda e: tf.one_hot(e, 10))
-                dataset = tf.data.Dataset.zip((x_data, y_data)).shuffle(500).batch(self.hparams.batch_size)
+                dataset = tf.data.Dataset.zip((x_data, y_data)).shuffle(500).batch(self.hparams["batch_size"])
             # Building initializable iterator object to access the Dataset object
             with tf.name_scope("iterator"):
                 iterator = dataset.make_initializable_iterator()
                 iter_init_op = iterator.initializer # This operation must be ran to initialize the Dataset and iterator objects
             # Extracting a batch of data from the Dataset object and prepping data 
             images, labels = iterator.get_next()
+            # Building training step counter 
+            global_step = tf.Variable(0, trainable = False, name = 'global_step')
             # Building model
             logits = self.build_model(name = "model", input = images)
             raw_prediction = tf.nn.softmax(logits)
@@ -217,7 +265,7 @@ class model(object):
             # Building training operations
             with tf.name_scope("train"):
                 optimizer = tf.train.AdamOptimizer()
-                train_op = optimizer.minimize(cost)
+                train_op = optimizer.minimize(cost, global_step = global_step)
             # Building evaluation metrics
             with tf.name_scope("accuracy"):
                 prediction = tf.argmax(raw_prediction, 1)
@@ -233,18 +281,19 @@ class model(object):
                 tf_graph.add_to_collection("nodes_to_run", node)
         return tf_graph
 
-hparams = tf.contrib.training.HParams(batch_size = 32, epochs = 1, L1_output_depth = 5,
-                                      L1_convo_kernal_shape = [5, 5], L1_strides = [1, 1, 1, 1],
-                                      L1_padding = "SAME", L1_use_bias = True, L1_act_func = tf.nn.relu,
-                                      L1_init_func_w = tf.random_normal, L1_init_func_b = tf.random_normal,
-                                      L1_init_func_params_w = {'stddev': 0.05}, L1_init_func_params_b = {'stddev': 0.05},
-                                      L2_m_pl_kernal_shape = [1, 2, 2, 1], L2_strides = [1, 2, 2, 1], L2_padding = "SAME",
-                                      L3_output_width = 100, L3_use_bias = True, L3_act_func = tf.nn.relu,
-                                      L3_init_func_w = tf.random_normal, L3_init_func_b = tf.random_normal,
-                                      L3_init_func_params_w = {'stddev': 0.05}, L3_init_func_params_b = {'stddev': 0.5},
-                                      Lo_init_func_w = tf.random_normal, Lo_init_func_b = tf.random_normal,
-                                      Lo_init_func_params_w = {'stddev': 0.05}, Lo_init_func_params_b = {'stddev': 0.5},
-                                      Lo_use_bias = True)        
-test_model = model(tf.float32, [28, 28], tf.int32, [1], hparams)   
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-test_model.train(x_train, y_train)      
+"""hparams = {"batch_size": 32, "epochs": 1, "L1_output_depth": 5,
+              "L1_convo_kernal_shape": [5, 5], "L1_strides": [1, 1, 1, 1],
+              "L1_padding": "SAME", "L1_use_bias": True, "L1_act_func": tf.nn.relu,
+              "L1_init_func_w": tf.random_normal, "L1_init_func_b": tf.random_normal,
+              "L1_init_func_params_w": {'stddev': 0.05}, "L1_init_func_params_b": {'stddev': 0.05},
+              "L2_m_pl_kernal_shape": [1, 2, 2, 1], "L2_strides": [1, 2, 2, 1], "L2_padding": "SAME",
+              "L3_output_width": 100, "L3_use_bias": True, "L3_act_func": tf.nn.relu,
+              "L3_init_func_w": tf.random_normal, "L3_init_func_b": tf.random_normal,
+              "L3_init_func_params_w": {'stddev': 0.05}, "L3_init_func_params_b": {'stddev': 0.5},
+              "Lo_init_func_w": tf.random_normal, "Lo_init_func_b": tf.random_normal,
+              "Lo_init_func_params_w": {'stddev': 0.05}, "Lo_init_func_params_b": {'stddev': 0.5},
+              "Lo_use_bias": True}"""
+                                      
+#test_model = model(".\\test\\", tf.float32, [28, 28], tf.int32, [1], hparams)   
+#(x_train, y_train), (x_test, y_test) = mnist.load_data()
+#test_model.train(x_train, y_train)      
